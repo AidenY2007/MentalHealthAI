@@ -4,12 +4,14 @@ import {
   browserLocalPersistence,
   createUserWithEmailAndPassword,
   getAuth,
+  updateProfile,
   signInWithEmailAndPassword,
   setPersistence,
   signInWithPopup,
   signInWithRedirect,
   signOut,
 } from 'firebase/auth'
+import { doc, getFirestore, serverTimestamp, setDoc } from 'firebase/firestore'
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -36,6 +38,7 @@ export const hasFirebaseConfig = requiredConfigKeys.every(
 
 const app = hasFirebaseConfig ? initializeApp(firebaseConfig) : null
 export const auth = app ? getAuth(app) : null
+export const db = app ? getFirestore(app) : null
 
 const googleProvider = auth ? new GoogleAuthProvider() : null
 
@@ -53,6 +56,36 @@ async function ensurePersistence() {
   await setPersistence(auth, browserLocalPersistence)
 }
 
+export async function saveUserProfile(user, profile = {}) {
+  if (!db || !user) {
+    throw new Error('Firebase Firestore is not configured.')
+  }
+
+  const firstName = profile.firstName?.trim() || ''
+  const lastName = profile.lastName?.trim() || ''
+  const displayName =
+    profile.displayName?.trim() ||
+    [firstName, lastName].filter(Boolean).join(' ') ||
+    user.displayName ||
+    ''
+
+  await setDoc(
+    doc(db, 'users', user.uid),
+    {
+      uid: user.uid,
+      email: user.email || profile.email || '',
+      firstName,
+      lastName,
+      displayName,
+      photoURL: user.photoURL || '',
+      providerIds: user.providerData.map((entry) => entry.providerId),
+      updatedAt: serverTimestamp(),
+      createdAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
 export async function signInWithGoogle() {
   if (!auth || !googleProvider) {
     throw new Error('Firebase auth is not configured.')
@@ -61,7 +94,12 @@ export async function signInWithGoogle() {
   await ensurePersistence()
 
   try {
-    return await signInWithPopup(auth, googleProvider)
+    const result = await signInWithPopup(auth, googleProvider)
+    await saveUserProfile(result.user, {
+      displayName: result.user.displayName || '',
+      email: result.user.email || '',
+    })
+    return result
   } catch (error) {
     const fallbackCodes = new Set([
       'auth/popup-blocked',
@@ -95,6 +133,31 @@ export async function signUpWithEmail(email, password) {
 
   await ensurePersistence()
   return createUserWithEmailAndPassword(auth, email, password)
+}
+
+export async function createUserAccount({
+  email,
+  password,
+  firstName,
+  lastName,
+}) {
+  const result = await signUpWithEmail(email, password)
+  const displayName = [firstName?.trim(), lastName?.trim()]
+    .filter(Boolean)
+    .join(' ')
+
+  if (displayName) {
+    await updateProfile(result.user, { displayName })
+  }
+
+  await saveUserProfile(result.user, {
+    firstName,
+    lastName,
+    displayName,
+    email,
+  })
+
+  return result
 }
 
 export async function signOutUser() {

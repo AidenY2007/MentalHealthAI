@@ -1,19 +1,16 @@
 import { useEffect, useState } from 'react'
 import { onAuthStateChanged } from 'firebase/auth'
+import googleLogo from '../assets/google.svg.png'
 import { agentBlueprint } from '../config/agentBlueprint'
 import { siteConfig } from '../config/site'
-import {
-  experiencePillars,
-  scenarioCategories,
-  scoringCategories,
-} from '../data/scenarios'
+import { scenarioCategories, scoringCategories } from '../data/scenarios'
 import {
   auth,
+  createUserAccount,
   hasFirebaseConfig,
   signInWithEmail,
   signInWithGoogle,
   signOutUser,
-  signUpWithEmail,
 } from '../lib/firebase'
 
 const sampleConversation = [
@@ -43,6 +40,8 @@ const roadmapItems = [
   'OpenAI-driven teen simulator with feedback, transcript review, and post-session scoring',
 ]
 
+const MIN_PASSWORD_LENGTH = 8
+
 function getFriendlyAuthError(error) {
   const messages = {
     'auth/email-already-in-use': 'That email is already in use.',
@@ -51,35 +50,44 @@ function getFriendlyAuthError(error) {
     'auth/missing-password': 'Enter your password.',
     'auth/popup-closed-by-user': 'The Google sign-in popup was closed.',
     'auth/too-many-requests': 'Too many attempts. Try again shortly.',
-    'auth/weak-password': 'Password should be at least 6 characters.',
+    'auth/weak-password': `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
   }
 
   return messages[error?.code] || error?.message || 'Authentication failed.'
 }
 
+function getGreeting() {
+  const hour = new Date().getHours()
+
+  if (hour < 12) {
+    return 'Good morning'
+  }
+
+  if (hour < 18) {
+    return 'Good afternoon'
+  }
+
+  return 'Good evening'
+}
+
 function Home() {
   const [user, setUser] = useState(null)
-  const [authStatus, setAuthStatus] = useState('Checking authentication...')
   const [authError, setAuthError] = useState('')
   const [isSigningIn, setIsSigningIn] = useState(false)
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
   const [authMode, setAuthMode] = useState('login')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
   useEffect(() => {
     if (!auth) {
-      setAuthStatus('Add your Firebase config in `.env` to enable sign-in.')
       return undefined
     }
 
     const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser)
-      setAuthStatus(
-        nextUser
-          ? `Signed in as ${nextUser.displayName || nextUser.email || 'volunteer'}`
-          : 'Not signed in',
-      )
     })
 
     return unsubscribe
@@ -103,6 +111,8 @@ function Home() {
   function openAuthModal(mode) {
     setAuthMode(mode)
     setAuthError('')
+    setFirstName('')
+    setLastName('')
     setEmail('')
     setPassword('')
     setIsAuthModalOpen(true)
@@ -121,7 +131,6 @@ function Home() {
       const result = await signInWithGoogle()
 
       if (result === null) {
-        setAuthStatus('Redirecting to Google sign-in...')
         closeAuthModal()
       } else {
         closeAuthModal()
@@ -136,13 +145,31 @@ function Home() {
   async function handleEmailAuth(event) {
     event.preventDefault()
     setAuthError('')
+
+    if (authMode === 'signup' && password.length < MIN_PASSWORD_LENGTH) {
+      setAuthError(
+        `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+      )
+      return
+    }
+
+    if (authMode === 'signup' && (!firstName.trim() || !lastName.trim())) {
+      setAuthError('Enter both your first and last name.')
+      return
+    }
+
     setIsSigningIn(true)
 
     try {
       if (authMode === 'login') {
         await signInWithEmail(email, password)
       } else {
-        await signUpWithEmail(email, password)
+        await createUserAccount({
+          email,
+          password,
+          firstName,
+          lastName,
+        })
       }
 
       closeAuthModal()
@@ -163,6 +190,12 @@ function Home() {
     }
   }
 
+  const greetingName =
+    user?.displayName?.trim()?.split(/\s+/)[0] ||
+    user?.email?.split('@')[0] ||
+    'there'
+  const heroGreeting = `${getGreeting()}, ${greetingName}!`
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -173,13 +206,18 @@ function Home() {
 
         <div className="topbar-actions">
           {user ? (
-            <button
-              className="secondary-action button-reset"
-              onClick={handleSignOut}
-              type="button"
-            >
-              Sign out
-            </button>
+            <>
+              <span className="topbar-user">
+                {user.displayName || user.email || 'volunteer'}
+              </span>
+              <button
+                className="secondary-action button-reset"
+                onClick={handleSignOut}
+                type="button"
+              >
+                Sign out
+              </button>
+            </>
           ) : (
             <>
               <button
@@ -205,108 +243,11 @@ function Home() {
 
       <section className="hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">Minimal light-blue homepage</p>
-          <h1>{siteConfig.name}</h1>
-          <p className="hero-text">
-            {siteConfig.tagline}
-          </p>
-          <p className="hero-supporting">
-            Built for volunteer practice sessions, realistic scenario training,
-            and reflective feedback after difficult conversations. The name is
-            now controlled from one shared config so it can be changed site wide
-            later without chasing text across the app.
-          </p>
-
-          <div className="hero-actions">
-            <a className="primary-action" href="#workspace">
-              Explore homepage
-            </a>
-            {user ? (
-              <button
-                className="secondary-action button-reset"
-                onClick={handleSignOut}
-                type="button"
-              >
-                Sign out
-              </button>
-            ) : (
-              <>
-                <button
-                  className="secondary-action button-reset"
-                  disabled={!hasFirebaseConfig}
-                  onClick={() => openAuthModal('login')}
-                  type="button"
-                >
-                  Log in
-                </button>
-                <button
-                  className="tertiary-action button-reset"
-                  disabled={!hasFirebaseConfig}
-                  onClick={() => openAuthModal('signup')}
-                  type="button"
-                >
-                  Sign up
-                </button>
-              </>
-            )}
-          </div>
-
-          <div className="auth-banner">
-            <div>
-              <p className="auth-label">Firebase authentication</p>
-              <p className="auth-status">{authStatus}</p>
-            </div>
-            <span className="auth-mode">
-              Google plus email/password are supported in the auth popup.
-            </span>
-          </div>
+          <h1>{heroGreeting}</h1>
+          <p className="hero-text">{siteConfig.tagline}</p>
 
           {authError ? <p className="auth-error">{authError}</p> : null}
-
-          <div className="hero-stats">
-            <article>
-              <strong>{scenarioCategories.length}</strong>
-              <span>core scenario tracks</span>
-            </article>
-            <article>
-              <strong>{scoringCategories.length}</strong>
-              <span>feedback dimensions</span>
-            </article>
-            <article>
-              <strong>2-column</strong>
-              <span>desktop chat plus notes layout</span>
-            </article>
-          </div>
         </div>
-
-        <div className="hero-card">
-          <p className="card-label">Homepage snapshot</p>
-          <div className="preview-orb" />
-          <div className="preview-stack">
-            <article className="preview-card">
-              <span>Scenario practice</span>
-              <strong>{scenarioCategories.length} guided topics</strong>
-            </article>
-            <article className="preview-card">
-              <span>Session review</span>
-              <strong>{scoringCategories.length} feedback dimensions</strong>
-            </article>
-            <article className="preview-card">
-              <span>Teen simulator</span>
-              <strong>{agentBlueprint.behaviorRules[0]}</strong>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section className="feature-strip">
-        {experiencePillars.map((pillar) => (
-          <article key={pillar.title} className="feature-card">
-            <p className="feature-kicker">{pillar.kicker}</p>
-            <h2>{pillar.title}</h2>
-            <p>{pillar.description}</p>
-          </article>
-        ))}
       </section>
 
       <section className="workspace-grid" id="workspace">
@@ -534,6 +475,32 @@ function Home() {
             </div>
 
             <form className="auth-form" onSubmit={handleEmailAuth}>
+              {authMode === 'signup' ? (
+                <div className="auth-name-grid">
+                  <label className="auth-field">
+                    <span>First name</span>
+                    <input
+                      autoComplete="given-name"
+                      onChange={(event) => setFirstName(event.target.value)}
+                      placeholder="First name"
+                      type="text"
+                      value={firstName}
+                    />
+                  </label>
+
+                  <label className="auth-field">
+                    <span>Last name</span>
+                    <input
+                      autoComplete="family-name"
+                      onChange={(event) => setLastName(event.target.value)}
+                      placeholder="Last name"
+                      type="text"
+                      value={lastName}
+                    />
+                  </label>
+                </div>
+              ) : null}
+
               <label className="auth-field">
                 <span>Email</span>
                 <input
@@ -551,8 +518,9 @@ function Home() {
                   autoComplete={
                     authMode === 'login' ? 'current-password' : 'new-password'
                   }
+                  minLength={authMode === 'signup' ? MIN_PASSWORD_LENGTH : undefined}
                   onChange={(event) => setPassword(event.target.value)}
-                  placeholder="At least 6 characters"
+                  placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                   type="password"
                   value={password}
                 />
@@ -581,7 +549,17 @@ function Home() {
               onClick={handleGoogleSignIn}
               type="button"
             >
-              {isSigningIn ? 'Working...' : 'Google'}
+              <img
+                alt=""
+                aria-hidden="true"
+                className="auth-google-logo"
+                src={googleLogo}
+              />
+              {isSigningIn
+                ? 'Working...'
+                : authMode === 'login'
+                  ? 'Log in with Google'
+                  : 'Sign up with Google'}
             </button>
 
             {authError ? <p className="auth-error auth-error-modal">{authError}</p> : null}
