@@ -1,12 +1,20 @@
 import { useEffect, useState } from 'react'
 import { onAuthStateChanged } from 'firebase/auth'
 import { agentBlueprint } from '../config/agentBlueprint'
+import { siteConfig } from '../config/site'
 import {
   experiencePillars,
   scenarioCategories,
   scoringCategories,
 } from '../data/scenarios'
-import { auth, hasFirebaseConfig, signInWithGoogle, signOutUser } from '../lib/firebase'
+import {
+  auth,
+  hasFirebaseConfig,
+  signInWithEmail,
+  signInWithGoogle,
+  signOutUser,
+  signUpWithEmail,
+} from '../lib/firebase'
 
 const sampleConversation = [
   {
@@ -35,11 +43,29 @@ const roadmapItems = [
   'OpenAI-driven teen simulator with feedback, transcript review, and post-session scoring',
 ]
 
+function getFriendlyAuthError(error) {
+  const messages = {
+    'auth/email-already-in-use': 'That email is already in use.',
+    'auth/invalid-email': 'Enter a valid email address.',
+    'auth/invalid-credential': 'Incorrect email or password.',
+    'auth/missing-password': 'Enter your password.',
+    'auth/popup-closed-by-user': 'The Google sign-in popup was closed.',
+    'auth/too-many-requests': 'Too many attempts. Try again shortly.',
+    'auth/weak-password': 'Password should be at least 6 characters.',
+  }
+
+  return messages[error?.code] || error?.message || 'Authentication failed.'
+}
+
 function Home() {
   const [user, setUser] = useState(null)
   const [authStatus, setAuthStatus] = useState('Checking authentication...')
   const [authError, setAuthError] = useState('')
   const [isSigningIn, setIsSigningIn] = useState(false)
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
+  const [authMode, setAuthMode] = useState('login')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
 
   useEffect(() => {
     if (!auth) {
@@ -59,6 +85,34 @@ function Home() {
     return unsubscribe
   }, [])
 
+  useEffect(() => {
+    if (!isAuthModalOpen) {
+      return undefined
+    }
+
+    function handleEscape(event) {
+      if (event.key === 'Escape') {
+        setIsAuthModalOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [isAuthModalOpen])
+
+  function openAuthModal(mode) {
+    setAuthMode(mode)
+    setAuthError('')
+    setEmail('')
+    setPassword('')
+    setIsAuthModalOpen(true)
+  }
+
+  function closeAuthModal() {
+    setIsAuthModalOpen(false)
+    setAuthError('')
+  }
+
   async function handleGoogleSignIn() {
     setAuthError('')
     setIsSigningIn(true)
@@ -68,9 +122,32 @@ function Home() {
 
       if (result === null) {
         setAuthStatus('Redirecting to Google sign-in...')
+        closeAuthModal()
+      } else {
+        closeAuthModal()
       }
     } catch (error) {
-      setAuthError(error.message || 'Google sign-in failed.')
+      setAuthError(getFriendlyAuthError(error))
+    } finally {
+      setIsSigningIn(false)
+    }
+  }
+
+  async function handleEmailAuth(event) {
+    event.preventDefault()
+    setAuthError('')
+    setIsSigningIn(true)
+
+    try {
+      if (authMode === 'login') {
+        await signInWithEmail(email, password)
+      } else {
+        await signUpWithEmail(email, password)
+      }
+
+      closeAuthModal()
+    } catch (error) {
+      setAuthError(getFriendlyAuthError(error))
     } finally {
       setIsSigningIn(false)
     }
@@ -88,20 +165,61 @@ function Home() {
 
   return (
     <main className="app-shell">
+      <header className="topbar">
+        <div>
+          <p className="topbar-mark">Early build</p>
+          <p className="topbar-name">{siteConfig.name}</p>
+        </div>
+
+        <div className="topbar-actions">
+          {user ? (
+            <button
+              className="secondary-action button-reset"
+              onClick={handleSignOut}
+              type="button"
+            >
+              Sign out
+            </button>
+          ) : (
+            <>
+              <button
+                className="secondary-action button-reset"
+                disabled={!hasFirebaseConfig}
+                onClick={() => openAuthModal('login')}
+                type="button"
+              >
+                Log in
+              </button>
+              <button
+                className="primary-action button-reset"
+                disabled={!hasFirebaseConfig}
+                onClick={() => openAuthModal('signup')}
+                type="button"
+              >
+                Sign up
+              </button>
+            </>
+          )}
+        </div>
+      </header>
+
       <section className="hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">TalkPrep</p>
-          <h1>Practice teen crisis conversations before they happen live.</h1>
+          <p className="eyebrow">Minimal light-blue homepage</p>
+          <h1>{siteConfig.name}</h1>
           <p className="hero-text">
-            A training workspace for Teen Line volunteers. The AI plays a
-            distressed teen, starts vague, reacts to empathy, pushes back when
-            the volunteer misses the moment, and stays realistic instead of
-            becoming agreeable or easy.
+            {siteConfig.tagline}
+          </p>
+          <p className="hero-supporting">
+            Built for volunteer practice sessions, realistic scenario training,
+            and reflective feedback after difficult conversations. The name is
+            now controlled from one shared config so it can be changed site wide
+            later without chasing text across the app.
           </p>
 
           <div className="hero-actions">
             <a className="primary-action" href="#workspace">
-              Explore the workspace
+              Explore homepage
             </a>
             {user ? (
               <button
@@ -112,14 +230,24 @@ function Home() {
                 Sign out
               </button>
             ) : (
-              <button
-                className="secondary-action button-reset"
-                disabled={!hasFirebaseConfig || isSigningIn}
-                onClick={handleGoogleSignIn}
-                type="button"
-              >
-                {isSigningIn ? 'Signing in...' : 'Continue with Google'}
-              </button>
+              <>
+                <button
+                  className="secondary-action button-reset"
+                  disabled={!hasFirebaseConfig}
+                  onClick={() => openAuthModal('login')}
+                  type="button"
+                >
+                  Log in
+                </button>
+                <button
+                  className="tertiary-action button-reset"
+                  disabled={!hasFirebaseConfig}
+                  onClick={() => openAuthModal('signup')}
+                  type="button"
+                >
+                  Sign up
+                </button>
+              </>
             )}
           </div>
 
@@ -129,7 +257,7 @@ function Home() {
               <p className="auth-status">{authStatus}</p>
             </div>
             <span className="auth-mode">
-              Email/Password + Google provider enabled
+              Google plus email/password are supported in the auth popup.
             </span>
           </div>
 
@@ -152,15 +280,21 @@ function Home() {
         </div>
 
         <div className="hero-card">
-          <p className="card-label">Simulator behavior</p>
-          <ul className="behavior-list">
-            {agentBlueprint.behaviorRules.map((rule) => (
-              <li key={rule}>{rule}</li>
-            ))}
-          </ul>
-          <div className="status-row">
-            <span className="status-dot" />
-            <p>Designed for desktop sessions and compressed mobile stacks.</p>
+          <p className="card-label">Homepage snapshot</p>
+          <div className="preview-orb" />
+          <div className="preview-stack">
+            <article className="preview-card">
+              <span>Scenario practice</span>
+              <strong>{scenarioCategories.length} guided topics</strong>
+            </article>
+            <article className="preview-card">
+              <span>Session review</span>
+              <strong>{scoringCategories.length} feedback dimensions</strong>
+            </article>
+            <article className="preview-card">
+              <span>Teen simulator</span>
+              <strong>{agentBlueprint.behaviorRules[0]}</strong>
+            </article>
           </div>
         </div>
       </section>
@@ -352,6 +486,108 @@ function Home() {
           </div>
         </article>
       </section>
+
+      {isAuthModalOpen ? (
+        <div
+          aria-hidden="true"
+          className="auth-modal-backdrop"
+          onClick={closeAuthModal}
+        >
+          <section
+            aria-labelledby="auth-modal-title"
+            aria-modal="true"
+            className="auth-modal"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="auth-modal-topline">
+              <div>
+                <p className="auth-modal-kicker">Secure access</p>
+                <h2 id="auth-modal-title">
+                  {authMode === 'login' ? 'Log in' : 'Create your account'}
+                </h2>
+              </div>
+              <button
+                className="modal-close button-reset"
+                onClick={closeAuthModal}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="auth-segmented">
+              <button
+                className={`auth-segment ${authMode === 'login' ? 'is-active' : ''}`}
+                onClick={() => setAuthMode('login')}
+                type="button"
+              >
+                Log in
+              </button>
+              <button
+                className={`auth-segment ${authMode === 'signup' ? 'is-active' : ''}`}
+                onClick={() => setAuthMode('signup')}
+                type="button"
+              >
+                Sign up
+              </button>
+            </div>
+
+            <form className="auth-form" onSubmit={handleEmailAuth}>
+              <label className="auth-field">
+                <span>Email</span>
+                <input
+                  autoComplete="email"
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@example.com"
+                  type="email"
+                  value={email}
+                />
+              </label>
+
+              <label className="auth-field">
+                <span>Password</span>
+                <input
+                  autoComplete={
+                    authMode === 'login' ? 'current-password' : 'new-password'
+                  }
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="At least 6 characters"
+                  type="password"
+                  value={password}
+                />
+              </label>
+
+              <button
+                className="primary-action button-reset auth-submit"
+                disabled={!hasFirebaseConfig || isSigningIn}
+                type="submit"
+              >
+                {isSigningIn
+                  ? 'Working...'
+                  : authMode === 'login'
+                    ? 'Log in with email'
+                    : 'Sign up with email'}
+              </button>
+            </form>
+
+            <div className="auth-divider">
+              <span>or continue with</span>
+            </div>
+
+            <button
+              className="secondary-action button-reset auth-google"
+              disabled={!hasFirebaseConfig || isSigningIn}
+              onClick={handleGoogleSignIn}
+              type="button"
+            >
+              {isSigningIn ? 'Working...' : 'Google'}
+            </button>
+
+            {authError ? <p className="auth-error auth-error-modal">{authError}</p> : null}
+          </section>
+        </div>
+      ) : null}
     </main>
   )
 }

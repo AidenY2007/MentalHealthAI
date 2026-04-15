@@ -2,7 +2,9 @@ import { initializeApp } from 'firebase/app'
 import {
   GoogleAuthProvider,
   browserLocalPersistence,
+  createUserWithEmailAndPassword,
   getAuth,
+  signInWithEmailAndPassword,
   setPersistence,
   signInWithPopup,
   signInWithRedirect,
@@ -75,6 +77,24 @@ export async function signInWithGoogle() {
     await signInWithRedirect(auth, googleProvider)
     return null
   }
+}
+
+export async function signInWithEmail(email, password) {
+  if (!auth) {
+    throw new Error('Firebase auth is not configured.')
+  }
+
+  await ensurePersistence()
+  return signInWithEmailAndPassword(auth, email, password)
+}
+
+export async function signUpWithEmail(email, password) {
+  if (!auth) {
+    throw new Error('Firebase auth is not configured.')
+  }
+
+  await ensurePersistence()
+  return createUserWithEmailAndPassword(auth, email, password)
 }
 
 export async function signOutUser() {
