@@ -1,71 +1,83 @@
 export const scenarioCategories = [
   {
+    id: 'relationships',
     name: 'Relationships',
     intensity: 'Low to medium',
     summary:
       'Conflict with friends, partners, or family where the teen tests trust before sharing what actually happened.',
   },
   {
+    id: 'bullying',
     name: 'Bullying',
     intensity: 'Medium',
     summary:
       'Online or in-person harassment that may start as a vague school complaint and escalate into fear or shame.',
   },
   {
+    id: 'child-abuse',
     name: 'Child abuse',
     intensity: 'High',
     summary:
       'Emotional, physical, or neglect scenarios that require careful pacing, safety awareness, and realistic resistance.',
   },
   {
+    id: 'suicide',
     name: 'Suicide',
     intensity: 'High risk',
     summary:
       'Hopelessness, passive thoughts, or active suicidal intent with escalating risk indicators depending on the volunteer response.',
   },
   {
+    id: 'body-image-disordered-eating',
     name: 'Body image and disordered eating',
     intensity: 'Medium',
     summary:
       'Shame, perfectionism, and control language that should not resolve quickly or cleanly.',
   },
   {
+    id: 'self-harm',
     name: 'Self-harm',
     intensity: 'High',
     summary:
       'Relief-seeking and secrecy patterns where the teen may minimize behavior unless the volunteer responds with care.',
   },
   {
+    id: 'sexual-gender-identity',
     name: 'Sexual and gender identity',
     intensity: 'Medium',
     summary:
       'Questions about identity, fear of rejection, and confusion about disclosure to peers or family.',
   },
   {
+    id: 'sexual-health',
     name: 'Sexual health',
     intensity: 'Medium',
     summary:
       'Embarrassment, misinformation, and trust-testing questions about sex, pregnancy, or STI worries.',
   },
   {
+    id: 'grief',
     name: 'Grief',
     intensity: 'Medium',
     summary:
       'Loss, numbness, guilt, or anger that may surface as irritability rather than direct sadness.',
   },
   {
+    id: 'anxiety',
     name: 'Anxiety',
     intensity: 'Low to medium',
     summary:
       'Panic, avoidance, racing thoughts, and academic pressure that often begin with short guarded replies.',
   },
   {
+    id: 'difficult-caller',
     name: 'Difficult caller',
     intensity: 'Variable',
     summary:
       'Mentally ill, distressed, angry, or limited-answer scenarios that challenge patience and de-escalation skills.',
   },
   {
+    id: 'rape-sexual-assault',
     name: 'Rape or sexual assault',
     intensity: 'High',
     summary:

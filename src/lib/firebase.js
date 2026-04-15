@@ -11,7 +11,19 @@ import {
   signInWithRedirect,
   signOut,
 } from 'firebase/auth'
-import { doc, getFirestore, serverTimestamp, setDoc } from 'firebase/firestore'
+import {
+  addDoc,
+  arrayRemove,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  getFirestore,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore'
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -69,21 +81,23 @@ export async function saveUserProfile(user, profile = {}) {
     user.displayName ||
     ''
 
-  await setDoc(
-    doc(db, 'users', user.uid),
-    {
-      uid: user.uid,
-      email: user.email || profile.email || '',
-      firstName,
-      lastName,
-      displayName,
-      photoURL: user.photoURL || '',
-      providerIds: user.providerData.map((entry) => entry.providerId),
-      updatedAt: serverTimestamp(),
-      createdAt: serverTimestamp(),
-    },
-    { merge: true },
-  )
+  const nextProfile = {
+    uid: user.uid,
+    email: user.email || profile.email || '',
+    firstName,
+    lastName,
+    displayName,
+    photoURL: user.photoURL || '',
+    providerIds: user.providerData.map((entry) => entry.providerId),
+    updatedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+  }
+
+  if (profile.completedScenarioIds) {
+    nextProfile.completedScenarioIds = profile.completedScenarioIds
+  }
+
+  await setDoc(doc(db, 'users', user.uid), nextProfile, { merge: true })
 }
 
 export async function signInWithGoogle() {
@@ -155,6 +169,7 @@ export async function createUserAccount({
     lastName,
     displayName,
     email,
+    completedScenarioIds: [],
   })
 
   return result
@@ -166,4 +181,77 @@ export async function signOutUser() {
   }
 
   await signOut(auth)
+}
+
+export function subscribeToUserProfile(userId, onValue, onError) {
+  if (!db || !userId) {
+    return () => {}
+  }
+
+  return onSnapshot(doc(db, 'users', userId), onValue, onError)
+}
+
+export async function setScenarioCompletion(userId, scenarioId, completed) {
+  if (!db || !userId) {
+    throw new Error('Firebase Firestore is not configured.')
+  }
+
+  await updateDoc(doc(db, 'users', userId), {
+    completedScenarioIds: completed
+      ? arrayUnion(scenarioId)
+      : arrayRemove(scenarioId),
+    updatedAt: serverTimestamp(),
+  })
+}
+
+export function subscribeToUserReflections(userId, onValue, onError) {
+  if (!db || !userId) {
+    return () => {}
+  }
+
+  return onSnapshot(
+    collection(db, 'users', userId, 'reflections'),
+    onValue,
+    onError,
+  )
+}
+
+export async function createReflection({ userId, email, title, responses }) {
+  if (!db || !userId) {
+    throw new Error('Firebase Firestore is not configured.')
+  }
+
+  return addDoc(collection(db, 'users', userId, 'reflections'), {
+    userId,
+    email: email || '',
+    title,
+    responses,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+}
+
+export async function updateReflection({
+  userId,
+  reflectionId,
+  title,
+  responses,
+}) {
+  if (!db || !userId || !reflectionId) {
+    throw new Error('Firebase Firestore is not configured.')
+  }
+
+  await updateDoc(doc(db, 'users', userId, 'reflections', reflectionId), {
+    title,
+    responses,
+    updatedAt: serverTimestamp(),
+  })
+}
+
+export async function deleteReflection(userId, reflectionId) {
+  if (!db || !userId || !reflectionId) {
+    throw new Error('Firebase Firestore is not configured.')
+  }
+
+  await deleteDoc(doc(db, 'users', userId, 'reflections', reflectionId))
 }
