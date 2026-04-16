@@ -19,6 +19,10 @@ service cloud.firestore {
         allow read, create, update, delete: if isOwner(userId);
       }
 
+      match /notes/{noteId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
       match /{document=**} {
         allow read, write: if false;
       }

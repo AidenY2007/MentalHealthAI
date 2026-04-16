@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "aytradingautomation"
-  }
+    "default": "mentalhealthai-f734b"
+  },
+  "targets": {},
+  "etags": {}
 }

@@ -3,18 +3,23 @@ import { onAuthStateChanged } from 'firebase/auth'
 import googleLogo from '../assets/google.svg.png'
 import { siteConfig } from '../config/site'
 import { scenarioCategories, scoringCategories } from '../data/scenarios'
+import { IMPLEMENTED_SCENARIOS } from '../data/scenarioPrompts'
 import {
   auth,
+  createNote,
   createReflection,
   createUserAccount,
+  deleteNote,
   deleteReflection,
   hasFirebaseConfig,
   setScenarioCompletion,
   signInWithEmail,
   signInWithGoogle,
   signOutUser,
+  subscribeToUserNotes,
   subscribeToUserReflections,
   subscribeToUserProfile,
+  updateNote,
   updateReflection,
 } from '../lib/firebase'
 
@@ -140,6 +145,15 @@ function Home() {
   const [editingReflectionId, setEditingReflectionId] = useState('')
   const [deletingReflectionId, setDeletingReflectionId] = useState('')
   const [pendingDeleteReflectionId, setPendingDeleteReflectionId] = useState('')
+  const [notes, setNotes] = useState([])
+  const [noteError, setNoteError] = useState('')
+  const [selectedNoteId, setSelectedNoteId] = useState('')
+  const [isCreatingNote, setIsCreatingNote] = useState(false)
+  const [noteTitle, setNoteTitle] = useState('')
+  const [noteContent, setNoteContent] = useState('')
+  const [editingNoteId, setEditingNoteId] = useState('')
+  const [deletingNoteId, setDeletingNoteId] = useState('')
+  const [pendingDeleteNoteId, setPendingDeleteNoteId] = useState('')
 
   useEffect(() => {
     function handlePopState() {
@@ -217,6 +231,47 @@ function Home() {
       },
       () => {
         setReflectionError('Could not load your reflections.')
+      },
+    )
+  }, [user?.uid])
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setNotes([])
+      setSelectedNoteId('')
+      return undefined
+    }
+
+    return subscribeToUserNotes(
+      user.uid,
+      (snapshot) => {
+        setNoteError('')
+        const nextNotes = snapshot.docs
+          .map((docSnapshot) => ({
+            id: docSnapshot.id,
+            ...docSnapshot.data(),
+          }))
+          .sort((left, right) => {
+            const leftTime = left.createdAt?.seconds || 0
+            const rightTime = right.createdAt?.seconds || 0
+            return rightTime - leftTime
+          })
+
+        setNotes(nextNotes)
+        setSelectedNoteId((currentId) => {
+          if (currentId === 'new') {
+            return currentId
+          }
+
+          if (currentId && nextNotes.some((item) => item.id === currentId)) {
+            return currentId
+          }
+
+          return nextNotes[0]?.id || ''
+        })
+      },
+      () => {
+        setNoteError('Could not load your notes.')
       },
     )
   }, [user?.uid])
@@ -355,7 +410,23 @@ function Home() {
     navigateTo('/reflections')
   }
 
+  function openPractice(scenarioId) {
+    if (!user?.uid) {
+      openAuthModal('login')
+      return
+    }
+
+    window.history.pushState({}, '', `/practice/${scenarioId}`)
+    window.dispatchEvent(new Event('popstate'))
+  }
+
   function openNotesView() {
+    if (!user?.uid) {
+      openAuthModal('login')
+      return
+    }
+
+    setNoteError('')
     navigateTo('/notes')
   }
 
@@ -512,6 +583,128 @@ function Home() {
     }))
   }
 
+  function openNewNote() {
+    setNoteTitle('')
+    setNoteContent('')
+    setEditingNoteId('')
+    setSelectedNoteId('new')
+    setNoteError('')
+  }
+
+  function openEditNote(note) {
+    setNoteTitle(note.title || '')
+    setNoteContent(note.content || '')
+    setEditingNoteId(note.id)
+    setSelectedNoteId('new')
+    setNoteError('')
+  }
+
+  async function handleCreateNote(event) {
+    event.preventDefault()
+
+    if (!user?.uid) {
+      openAuthModal('login')
+      return
+    }
+
+    setNoteError('')
+    setIsCreatingNote(true)
+
+    try {
+      if (!noteTitle.trim()) {
+        setNoteError('Enter a title for your note.')
+        setIsCreatingNote(false)
+        return
+      }
+
+      const title = noteTitle.trim()
+      const content = noteContent
+
+      if (editingNoteId) {
+        await updateNote({ userId: user.uid, noteId: editingNoteId, title, content })
+
+        setNotes((current) =>
+          current.map((note) =>
+            note.id === editingNoteId ? { ...note, title, content } : note,
+          ),
+        )
+      } else {
+        const docRef = await createNote({
+          userId: user.uid,
+          email: user.email || '',
+          title,
+          content,
+        })
+
+        const optimisticNote = {
+          id: docRef.id,
+          userId: user.uid,
+          email: user.email || '',
+          title,
+          content,
+          createdAt: { toDate: () => new Date() },
+        }
+
+        setNotes((current) => {
+          if (current.some((note) => note.id === docRef.id)) {
+            return current
+          }
+
+          return [optimisticNote, ...current]
+        })
+      }
+
+      setSelectedNoteId('')
+      setNoteTitle('')
+      setEditingNoteId('')
+    } catch (error) {
+      setNoteError(error.message || 'Could not save your note.')
+    } finally {
+      setIsCreatingNote(false)
+    }
+  }
+
+  async function handleDeleteNote(noteId) {
+    if (!user?.uid) {
+      openAuthModal('login')
+      return
+    }
+
+    setNoteError('')
+    setDeletingNoteId(noteId)
+
+    try {
+      await deleteNote(user.uid, noteId)
+      setNotes((current) => current.filter((note) => note.id !== noteId))
+
+      setSelectedNoteId((current) => (current === noteId ? '' : current))
+
+      if (editingNoteId === noteId) {
+        setEditingNoteId('')
+        setNoteTitle('')
+        setNoteContent('')
+        setSelectedNoteId('')
+      }
+    } catch (error) {
+      setNoteError(error.message || 'Could not delete your note.')
+    } finally {
+      setDeletingNoteId('')
+    }
+  }
+
+  function requestDeleteNote(noteId) {
+    setPendingDeleteNoteId(noteId)
+    setNoteError('')
+  }
+
+  function closeDeleteNoteModal() {
+    if (deletingNoteId) {
+      return
+    }
+
+    setPendingDeleteNoteId('')
+  }
+
   const greetingName =
     user?.displayName?.trim()?.split(/\s+/)[0] ||
     user?.email?.split('@')[0] ||
@@ -531,6 +724,8 @@ function Home() {
   )
   const selectedReflection =
     reflections.find((reflection) => reflection.id === selectedReflectionId) || null
+  const selectedNote =
+    notes.find((note) => note.id === selectedNoteId) || null
 
   function renderTopbar() {
     return (
@@ -729,6 +924,152 @@ function Home() {
     )
   }
 
+  function renderSignedOutLanding() {
+    const implementedCount = IMPLEMENTED_SCENARIOS.size
+    const totalCount = scenarioCategories.length
+
+    return (
+      <section className="marketing-shell">
+        <article className="marketing-hero">
+          <div className="marketing-copy">
+            <p className="marketing-kicker">Teen support simulation</p>
+            <h1>Train for hard conversations before they become real ones.</h1>
+            <p className="marketing-description">
+              {siteConfig.name} is a rehearsal space for Teen Line volunteers.
+              Practice realistic text conversations, document your thinking,
+              and review how you handled moments that escalate slowly.
+            </p>
+
+            <div className="marketing-actions">
+              <button
+                className="primary-action button-reset"
+                disabled={!hasFirebaseConfig}
+                onClick={() => openAuthModal('signup')}
+                type="button"
+              >
+                Create account
+              </button>
+              <button
+                className="secondary-action button-reset"
+                disabled={!hasFirebaseConfig}
+                onClick={() => openAuthModal('login')}
+                type="button"
+              >
+                Log in
+              </button>
+            </div>
+
+            <div className="marketing-stats">
+              <article className="marketing-stat">
+                <strong>{totalCount}</strong>
+                <span>scenario tracks</span>
+              </article>
+              <article className="marketing-stat">
+                <strong>{implementedCount}</strong>
+                <span>live simulations</span>
+              </article>
+              <article className="marketing-stat">
+                <strong>{scoringCategories.length}</strong>
+                <span>reflection lenses</span>
+              </article>
+            </div>
+          </div>
+
+          <div className="marketing-stage" aria-hidden="true">
+            <div className="signal-grid">
+              <div className="signal-card signal-card-primary">
+                <span>Session feel</span>
+                <strong>Starts vague. Opens with trust.</strong>
+                <p>
+                  The simulator does not reveal everything immediately, which
+                  forces volunteers to pace empathy and curiosity correctly.
+                </p>
+              </div>
+              <div className="signal-card signal-card-secondary">
+                <span>Behavior model</span>
+                <strong>Push back when the response misses.</strong>
+                <p>
+                  Dismissive or overly clinical replies make the teen close up,
+                  shorten answers, or question the conversation.
+                </p>
+              </div>
+              <div className="pulse-orbit pulse-orbit-a" />
+              <div className="pulse-orbit pulse-orbit-b" />
+              <div className="signal-thread thread-a" />
+              <div className="signal-thread thread-b" />
+            </div>
+          </div>
+        </article>
+
+        <section className="marketing-grid">
+          <article className="marketing-panel">
+            <p className="marketing-kicker">What gets practiced</p>
+            <h2>Not just chat replies. Actual volunteer judgment.</h2>
+            <div className="marketing-list">
+              <div className="marketing-list-item">
+                <strong>Conversation pacing</strong>
+                <span>
+                  The teen begins uncertain, guarded, irritated, or indirect so
+                  volunteers must earn clarity instead of extracting it.
+                </span>
+              </div>
+              <div className="marketing-list-item">
+                <strong>Boundary pressure</strong>
+                <span>
+                  Scenarios can question whether Teen Line is real, ask where
+                  the volunteer lives, or try to blur the relationship.
+                </span>
+              </div>
+              <div className="marketing-list-item">
+                <strong>Post-session reflection</strong>
+                <span>
+                  Notes and reflections stay connected to the training workflow
+                  so practice becomes reviewable instead of disposable.
+                </span>
+              </div>
+            </div>
+          </article>
+
+          <article className="marketing-panel marketing-panel-accent">
+            <p className="marketing-kicker">Training signals</p>
+            <h2>Volunteers are measured on more than warmth.</h2>
+            <div className="lens-stack">
+              {scoringCategories.slice(0, 4).map((category, index) => (
+                <div
+                  key={category.title}
+                  className="lens-card"
+                  style={{ '--delay': `${index * 90}ms` }}
+                >
+                  <strong>{category.title}</strong>
+                  <span>{category.description}</span>
+                </div>
+              ))}
+            </div>
+          </article>
+        </section>
+
+        <section className="marketing-band">
+          <div className="marketing-band-copy">
+            <p className="marketing-kicker">Scenario range</p>
+            <h2>Bullying, abuse, suicide, identity, grief, anger, and more.</h2>
+            <p>
+              The library spans relationship stress, self-harm, sexual assault,
+              eating disorders, difficult callers, and other high-stakes themes
+              that volunteers need to encounter before live shifts.
+            </p>
+          </div>
+          <div className="marketing-tags">
+            {scenarioCategories.slice(0, 8).map((scenario) => (
+              <span key={scenario.id} className="marketing-tag">
+                {scenario.name}
+              </span>
+            ))}
+          </div>
+        </section>
+      </section>
+    )
+  }
+
   function renderReflectionsPage() {
     return (
       <section className="reflection-page">
@@ -897,7 +1238,7 @@ function Home() {
           <div className="section-heading">
             <div>
               <p className="eyebrow">Notes</p>
-              <h2>General Notes</h2>
+              <h2>My Notes</h2>
             </div>
             <div className="reflection-actions">
               <button
@@ -907,12 +1248,130 @@ function Home() {
               >
                 Back to dashboard
               </button>
+              <button
+                className="primary-action button-reset"
+                onClick={openNewNote}
+                type="button"
+              >
+                New note
+              </button>
             </div>
           </div>
 
-          <p className="scenario-empty">
-            This notes page now has its own URL. Notes persistence can be added next.
-          </p>
+          {noteError ? <p className="auth-error">{noteError}</p> : null}
+
+          <div className="reflection-list">
+            {notes.length ? (
+              notes.map((note) => (
+                <article
+                  key={note.id}
+                  className={`reflection-list-item ${
+                    selectedNoteId === note.id ? 'is-active' : ''
+                  }`}
+                >
+                  <button
+                    className="reflection-open button-reset"
+                    onClick={() => setSelectedNoteId(note.id)}
+                    type="button"
+                  >
+                    <strong>{note.title}</strong>
+                    <span>{formatReflectionDate(note)}</span>
+                  </button>
+                  <div className="reflection-item-actions">
+                    <button
+                      aria-label="Edit note"
+                      className="reflection-icon-button button-reset"
+                      onClick={() => openEditNote(note)}
+                      title="Edit note"
+                      type="button"
+                    >
+                      <PencilIcon />
+                    </button>
+                    <button
+                      aria-label="Delete note"
+                      className="reflection-icon-button reflection-delete button-reset"
+                      disabled={deletingNoteId === note.id}
+                      onClick={() => requestDeleteNote(note.id)}
+                      title="Delete note"
+                      type="button"
+                    >
+                      {deletingNoteId === note.id ? '…' : <TrashIcon />}
+                    </button>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="scenario-empty">
+                No notes yet. Start one with the button above.
+              </p>
+            )}
+          </div>
+
+          {selectedNoteId === 'new' ? (
+            <>
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">
+                    {editingNoteId ? 'Edit note' : 'New note'}
+                  </p>
+                  <h2>Keep quick reminders for future training sessions</h2>
+                </div>
+              </div>
+
+              <form className="reflection-form" onSubmit={handleCreateNote}>
+                <label className="reflection-field">
+                  <span>Add title</span>
+                  <input
+                    className="reflection-title-input"
+                    onChange={(event) => setNoteTitle(event.target.value)}
+                    placeholder="Name this note so it is easy to find later."
+                    type="text"
+                    value={noteTitle}
+                  />
+                </label>
+
+                <label className="reflection-field">
+                  <span>Note</span>
+                  <textarea
+                    onChange={(event) => setNoteContent(event.target.value)}
+                    placeholder="Write your note here..."
+                    rows={8}
+                    value={noteContent}
+                  />
+                </label>
+
+                <button
+                  className="primary-action button-reset"
+                  disabled={isCreatingNote}
+                  type="submit"
+                >
+                  {isCreatingNote
+                    ? 'Saving...'
+                    : editingNoteId
+                      ? 'Save changes'
+                      : 'Save note'}
+                </button>
+              </form>
+            </>
+          ) : selectedNote ? (
+            <>
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Saved note</p>
+                  <h2>{selectedNote.title}</h2>
+                </div>
+                <span className="section-badge">
+                  {formatReflectionDate(selectedNote)}
+                </span>
+              </div>
+
+              <div className="reflection-content">
+                <article className="reflection-response">
+                  <p>{selectedNote.content || 'No content saved.'}</p>
+                </article>
+              </div>
+            </>
+          ) : null}
         </article>
       </section>
     )
@@ -940,10 +1399,9 @@ function Home() {
 
           <div className="reflection-content">
             <article className="reflection-response">
-              <h3>Need help with your account?</h3>
+              <h3>Need help?</h3>
               <p>
-                Use this page for support resources, troubleshooting, and contact
-                info as the app expands.
+                Email <a href="mailto:zihan27@mhs-la.org">zihan27@mhs-la.org</a> or <a href="mailto:daisyyeon27@marlborough.org">daisyyeon27@marlborough.org</a>
               </p>
             </article>
           </div>
@@ -1030,101 +1488,77 @@ function Home() {
               </div>
             </div>
 
+            <p className="scenario-group-label">Incomplete</p>
             <div className="scenario-list">
-              <section className="scenario-group">
-                <div className="scenario-group-heading">
-                  <h3>Uncompleted</h3>
-                  <span>{uncompletedScenarios.length}</span>
-                </div>
-
-                {uncompletedScenarios.length ? (
-                  uncompletedScenarios.map((scenario) => (
+              {scenarioCategories
+                .filter((s) => !completedScenarioIds.includes(s.id))
+                .sort((a, b) => {
+                  const aImpl = IMPLEMENTED_SCENARIOS.has(a.id) ? 0 : 1
+                  const bImpl = IMPLEMENTED_SCENARIOS.has(b.id) ? 0 : 1
+                  if (aImpl !== bImpl) return aImpl - bImpl
+                  return a.name.localeCompare(b.name)
+                })
+                .map((scenario) => {
+                  const implemented = IMPLEMENTED_SCENARIOS.has(scenario.id)
+                  return (
                     <article key={scenario.id} className="scenario-item">
                       <div className="scenario-topline">
                         <h3>{scenario.name}</h3>
-                        <span>{scenario.intensity}</span>
+                        <span className={implemented ? 'scenario-status-implemented' : 'scenario-status-not-implemented'}>
+                          {implemented ? 'Implemented' : 'Not implemented'}
+                        </span>
                       </div>
                       <p>{scenario.summary}</p>
                       <button
                         className="scenario-action button-reset"
-                        disabled={updatingScenarioId === scenario.id}
-                        onClick={() => handleScenarioToggle(scenario.id, true)}
+                        onClick={() => openPractice(scenario.id)}
                         type="button"
                       >
-                        {updatingScenarioId === scenario.id
-                          ? 'Saving...'
-                          : 'Mark complete'}
+                        Start
                       </button>
                     </article>
-                  ))
-                ) : (
-                  <p className="scenario-empty">All categories are completed.</p>
-                )}
-              </section>
+                  )
+                })}
+            </div>
 
-              <section className="scenario-group">
-                <div className="scenario-group-heading">
-                  <h3>Completed</h3>
-                  <span>{completedScenarios.length}</span>
+            {completedScenarios.length > 0 ? (
+              <>
+                <p className="scenario-group-label scenario-group-label-completed">Completed</p>
+                <div className="scenario-list">
+                  {completedScenarios
+                    .slice()
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((scenario) => (
+                      <article key={scenario.id} className="scenario-item scenario-item-completed">
+                        <div className="scenario-topline">
+                          <h3>{scenario.name}</h3>
+                          <span className="scenario-status-completed">Completed</span>
+                        </div>
+                        <p>{scenario.summary}</p>
+                        <button
+                          className="scenario-action button-reset"
+                          onClick={() => openPractice(scenario.id)}
+                          type="button"
+                        >
+                          Practice again
+                        </button>
+                      </article>
+                    ))}
                 </div>
-
-                {completedScenarios.length ? (
-                  completedScenarios.map((scenario) => (
-                    <article
-                      key={scenario.id}
-                      className="scenario-item scenario-item-complete"
-                    >
-                      <div className="scenario-topline">
-                        <h3>{scenario.name}</h3>
-                        <span>Completed</span>
-                      </div>
-                      <p>{scenario.summary}</p>
-                      <button
-                        className="scenario-action scenario-action-complete button-reset"
-                        disabled={updatingScenarioId === scenario.id}
-                        onClick={() => handleScenarioToggle(scenario.id, false)}
-                        type="button"
-                      >
-                        {updatingScenarioId === scenario.id
-                          ? 'Saving...'
-                          : 'Mark incomplete'}
-                      </button>
-                    </article>
-                  ))
-                ) : (
-                  <p className="scenario-empty">No categories completed yet.</p>
-                )}
-              </section>
-            </div>
+              </>
+            ) : null}
           </article>
         </section>
 
-        <section className="workspace-grid" id="workspace">
-          <article className="workspace-card">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Scoring</p>
-                <h2>Evaluate more than whether the chat felt nice</h2>
-              </div>
-            </div>
-
-            <div className="score-list">
-              {scoringCategories.map((category) => (
-                <article key={category.title} className="score-item">
-                  <h3>{category.title}</h3>
-                  <p>{category.description}</p>
-                </article>
-              ))}
-            </div>
-          </article>
-        </section>
       </>
     )
   }
 
   let pageContent = renderDashboard()
 
-  if (currentPath === '/reflections') {
+  if (!user && currentPath === '/') {
+    pageContent = renderSignedOutLanding()
+  } else if (currentPath === '/reflections') {
     pageContent = renderReflectionsPage()
   } else if (currentPath === '/notes') {
     pageContent = renderNotesPage()
@@ -1139,6 +1573,57 @@ function Home() {
         {pageContent}
         {renderAuthModal()}
       </main>
+
+      {pendingDeleteNoteId ? (
+        <div
+          aria-hidden="true"
+          className="auth-modal-backdrop"
+          onClick={closeDeleteNoteModal}
+        >
+          <section
+            aria-labelledby="delete-note-title"
+            aria-modal="true"
+            className="auth-modal delete-modal"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="auth-modal-topline">
+              <div>
+                <p className="auth-modal-kicker">Delete note</p>
+                <h2 id="delete-note-title">
+                  Are you sure you want to delete this note?
+                </h2>
+              </div>
+            </div>
+
+            <p className="delete-modal-copy">
+              This will remove it from your saved notes permanently.
+            </p>
+
+            <div className="delete-modal-actions">
+              <button
+                className="secondary-action button-reset"
+                disabled={Boolean(deletingNoteId)}
+                onClick={closeDeleteNoteModal}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="primary-action delete-confirm button-reset"
+                disabled={Boolean(deletingNoteId)}
+                onClick={async () => {
+                  await handleDeleteNote(pendingDeleteNoteId)
+                  setPendingDeleteNoteId('')
+                }}
+                type="button"
+              >
+                {deletingNoteId ? 'Deleting...' : 'Delete note'}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {pendingDeleteReflectionId ? (
         <div

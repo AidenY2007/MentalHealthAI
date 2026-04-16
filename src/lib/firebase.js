@@ -255,3 +255,50 @@ export async function deleteReflection(userId, reflectionId) {
 
   await deleteDoc(doc(db, 'users', userId, 'reflections', reflectionId))
 }
+
+export function subscribeToUserNotes(userId, onValue, onError) {
+  if (!db || !userId) {
+    return () => {}
+  }
+
+  return onSnapshot(
+    collection(db, 'users', userId, 'notes'),
+    onValue,
+    onError,
+  )
+}
+
+export async function createNote({ userId, email, title, content }) {
+  if (!db || !userId) {
+    throw new Error('Firebase Firestore is not configured.')
+  }
+
+  return addDoc(collection(db, 'users', userId, 'notes'), {
+    userId,
+    email: email || '',
+    title,
+    content,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+}
+
+export async function updateNote({ userId, noteId, title, content }) {
+  if (!db || !userId || !noteId) {
+    throw new Error('Firebase Firestore is not configured.')
+  }
+
+  await updateDoc(doc(db, 'users', userId, 'notes', noteId), {
+    title,
+    content,
+    updatedAt: serverTimestamp(),
+  })
+}
+
+export async function deleteNote(userId, noteId) {
+  if (!db || !userId || !noteId) {
+    throw new Error('Firebase Firestore is not configured.')
+  }
+
+  await deleteDoc(doc(db, 'users', userId, 'notes', noteId))
+}
