@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Home from './pages/Home'
 import Practice from './pages/Practice'
 import './App.css'
@@ -6,6 +6,7 @@ import { siteConfig } from './config/site'
 
 function App() {
   const [currentPath, setCurrentPath] = useState(window.location.pathname)
+  const hasTrackedInitialPageView = useRef(false)
 
   useEffect(() => {
     document.title = siteConfig.name
@@ -14,6 +15,23 @@ function App() {
     if (descriptionTag) {
       descriptionTag.setAttribute('content', siteConfig.description)
     }
+  }, [currentPath])
+
+  useEffect(() => {
+    if (!hasTrackedInitialPageView.current) {
+      hasTrackedInitialPageView.current = true
+      return
+    }
+
+    if (typeof window.gtag !== 'function') {
+      return
+    }
+
+    window.gtag('event', 'page_view', {
+      page_path: currentPath,
+      page_location: window.location.href,
+      page_title: document.title,
+    })
   }, [currentPath])
 
   useEffect(() => {

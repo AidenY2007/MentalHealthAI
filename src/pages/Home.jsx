@@ -299,7 +299,7 @@ function Home() {
     }
 
     window.history.pushState({}, '', nextPath)
-    setCurrentPath(nextPath)
+    window.dispatchEvent(new Event('popstate'))
   }
 
   function openAuthModal(mode) {
@@ -376,7 +376,7 @@ function Home() {
     try {
       await signOutUser()
       window.history.pushState({}, '', '/')
-      setCurrentPath('/')
+      window.dispatchEvent(new Event('popstate'))
     } catch (error) {
       setAuthError(error.message || 'Sign-out failed.')
     }
