@@ -14,7 +14,7 @@ function App() {
     if (descriptionTag) {
       descriptionTag.setAttribute('content', siteConfig.description)
     }
-  }, [])
+  }, [currentPath])
 
   useEffect(() => {
     function handlePopState() {
