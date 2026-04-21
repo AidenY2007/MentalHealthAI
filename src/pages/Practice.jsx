@@ -24,6 +24,39 @@ function getVolunteerFirstName(user) {
   return 'there'
 }
 
+function getScenarioVariant(scenarioId) {
+  if (scenarioId === 'body-image-disordered-eating') {
+    return Math.random() < 0.5 ? 'bella' : 'aaron'
+  }
+
+  if (scenarioId === 'suicide') {
+    const suicideVariants = ['max', 'daena', 'kai', 'noah']
+    return suicideVariants[Math.floor(Math.random() * suicideVariants.length)]
+  }
+
+  if (scenarioId === 'self-harm') {
+    const selfHarmVariants = ['samantha', 'caleb', 'chloe']
+    return selfHarmVariants[Math.floor(Math.random() * selfHarmVariants.length)]
+  }
+
+  if (scenarioId === 'child-abuse') {
+    const childAbuseVariants = ['stella', 'elias']
+    return childAbuseVariants[Math.floor(Math.random() * childAbuseVariants.length)]
+  }
+
+  if (scenarioId === 'anxiety') {
+    const anxietyVariants = ['stella', 'ethan', 'maya']
+    return anxietyVariants[Math.floor(Math.random() * anxietyVariants.length)]
+  }
+
+  if (scenarioId === 'rape-sexual-assault') {
+    const assaultVariants = ['diana', 'maya']
+    return assaultVariants[Math.floor(Math.random() * assaultVariants.length)]
+  }
+
+  return null
+}
+
 function Practice({ scenarioId }) {
   const [user, setUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -42,8 +75,8 @@ function Practice({ scenarioId }) {
   const scenario = scenarioCategories.find((s) => s.id === scenarioId)
   const isImplemented = IMPLEMENTED_SCENARIOS.has(scenarioId)
 
-  // Pick eating disorder variant once per session
-  const variantRef = useRef(Math.random() < 0.5 ? 'bella' : 'aaron')
+  // Pick scenario variant once per session when a category has multiple stories.
+  const variantRef = useRef(getScenarioVariant(scenarioId))
 
   useEffect(() => {
     if (!auth) {

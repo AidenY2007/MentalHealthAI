@@ -5,6 +5,7 @@
 }
 
 .topbar {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -28,6 +29,22 @@
   color: var(--text-strong);
   font-weight: 600;
   font-size: 0.94rem;
+}
+
+.topbar-side {
+  display: flex;
+  align-items: center;
+}
+
+.topbar-brand-centered {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--text-strong);
+  font-weight: 700;
+  font-size: 1.45rem;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .hero-panel,
@@ -672,6 +689,21 @@
   cursor: pointer;
 }
 
+.scenario-action-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.scenario-action-row .scenario-action {
+  margin-top: 0;
+}
+
+.scenario-action-secondary {
+  background: rgba(255, 255, 255, 0.7);
+}
+
 .scenario-action-complete {
   background: rgba(52, 185, 142, 0.12);
   border-color: rgba(52, 185, 142, 0.24);
@@ -1133,6 +1165,7 @@
   }
 }
 
+
 @keyframes pulseRing {
   0%,
   100% {
@@ -1504,6 +1537,12 @@
     border-radius: 28px;
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .topbar-brand-centered {
+    position: static;
+    transform: none;
+    font-size: 1.25rem;
   }
 
   .section-heading {

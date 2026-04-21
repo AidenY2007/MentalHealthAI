@@ -375,6 +375,8 @@ function Home() {
 
     try {
       await signOutUser()
+      window.history.pushState({}, '', '/')
+      setCurrentPath('/')
     } catch (error) {
       setAuthError(error.message || 'Sign-out failed.')
     }
@@ -730,7 +732,7 @@ function Home() {
   function renderTopbar() {
     return (
       <header className="topbar">
-        <div>
+        <div className={`topbar-side ${!user ? 'topbar-side-left' : ''}`}>
           <button
             className="secondary-action button-reset"
             onClick={() => navigateTo('/support')}
@@ -740,7 +742,9 @@ function Home() {
           </button>
         </div>
 
-        <div className="topbar-actions">
+        {!user ? <span className="topbar-brand-centered">{siteConfig.name}</span> : null}
+
+        <div className={`topbar-actions ${!user ? 'topbar-side-right' : ''}`}>
           {user ? (
             <>
               <span className="topbar-user">
@@ -1535,13 +1539,25 @@ function Home() {
                           <span className="scenario-status-completed">Completed</span>
                         </div>
                         <p>{scenario.summary}</p>
-                        <button
-                          className="scenario-action button-reset"
-                          onClick={() => openPractice(scenario.id)}
-                          type="button"
-                        >
-                          Practice again
-                        </button>
+                        <div className="scenario-action-row">
+                          <button
+                            className="scenario-action button-reset"
+                            onClick={() => openPractice(scenario.id)}
+                            type="button"
+                          >
+                            Practice again
+                          </button>
+                          <button
+                            className="scenario-action scenario-action-secondary button-reset"
+                            disabled={updatingScenarioId === scenario.id}
+                            onClick={() => handleScenarioToggle(scenario.id, false)}
+                            type="button"
+                          >
+                            {updatingScenarioId === scenario.id
+                              ? 'Saving...'
+                              : 'Mark incomplete'}
+                          </button>
+                        </div>
                       </article>
                     ))}
                 </div>
