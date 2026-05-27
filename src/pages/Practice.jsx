@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { onAuthStateChanged } from 'firebase/auth'
 import { getFunctions, httpsCallable } from 'firebase/functions'
-import { auth, createNote, setScenarioCompletion } from '../lib/firebase'
+import { auth, createNote, setScenarioCompletion, getStorylineById, subscribeToScenarioOverrides, saveTranscript } from '../lib/firebase'
 import { scenarioCategories } from '../data/scenarios'
-import { getSystemPrompt, IMPLEMENTED_SCENARIOS } from '../data/scenarioPrompts'
+import { getSystemPrompt, buildSystemPromptFromBio, buildCustomStorylinePrompt, IMPLEMENTED_SCENARIOS, SCENARIO_CHARACTER_NAMES } from '../data/scenarioPrompts'
 
 function navigateHome() {
   window.history.pushState({}, '', '/')
@@ -58,8 +58,13 @@ function getScenarioVariant(scenarioId) {
 }
 
 function Practice({ scenarioId }) {
+  const isCustom = scenarioId.startsWith('custom-')
+  const firestoreId = isCustom ? scenarioId.slice(7) : null
+
   const [user, setUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [customScenario, setCustomScenario] = useState(null)
+  const [customLoading, setCustomLoading] = useState(isCustom)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -71,9 +76,11 @@ function Practice({ scenarioId }) {
   const [sessionStarted, setSessionStarted] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+  const customScenarioRef = useRef(null)
+  const scenarioOverridesRef = useRef({})
 
-  const scenario = scenarioCategories.find((s) => s.id === scenarioId)
-  const isImplemented = IMPLEMENTED_SCENARIOS.has(scenarioId)
+  const scenario = isCustom ? customScenario : scenarioCategories.find((s) => s.id === scenarioId)
+  const isImplemented = isCustom ? !!customScenario : IMPLEMENTED_SCENARIOS.has(scenarioId)
 
   // Pick scenario variant once per session when a category has multiple stories.
   const variantRef = useRef(getScenarioVariant(scenarioId))
@@ -91,6 +98,27 @@ function Practice({ scenarioId }) {
   }, [])
 
   useEffect(() => {
+    return subscribeToScenarioOverrides((snap) => {
+      const map = {}
+      snap.docs.forEach((d) => { map[d.id] = d.data() })
+      scenarioOverridesRef.current = map
+    }, () => {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (!isCustom || !firestoreId) return
+    getStorylineById(firestoreId).then((data) => {
+      customScenarioRef.current = data
+      setCustomScenario(data)
+      setCustomLoading(false)
+    }).catch(() => {
+      setCustomLoading(false)
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
     if (!authLoading && user && isImplemented && !sessionStarted) {
       setSessionStarted(true)
       startConversation()
@@ -103,7 +131,18 @@ function Practice({ scenarioId }) {
   }, [messages])
 
   async function callChat(messageHistory) {
-    const systemPrompt = getSystemPrompt(scenarioId, variantRef.current)
+    let systemPrompt
+    if (isCustom && customScenarioRef.current) {
+      const charName = customScenarioRef.current.name?.trim()
+      const charBio = charName ? `Your name is ${charName}.\n\n${customScenarioRef.current.bio}` : customScenarioRef.current.bio
+      systemPrompt = buildCustomStorylinePrompt(charBio, customScenarioRef.current.categoryName)
+    } else {
+      const variantKey = variantRef.current
+      const overrideBios = scenarioOverridesRef.current?.[scenarioId]?.bios
+      const resolvedKey = variantKey && overrideBios?.[variantKey] !== undefined ? variantKey : 'default'
+      const bioOverride = overrideBios?.[resolvedKey]
+      systemPrompt = bioOverride ? buildSystemPromptFromBio(bioOverride) : getSystemPrompt(scenarioId, variantKey)
+    }
 
     // Add typing placeholder
     setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
@@ -205,11 +244,40 @@ function Practice({ scenarioId }) {
   async function completeAndNavigate() {
     if (user?.uid && scenarioId) {
       try {
-        await setScenarioCompletion(user.uid, scenarioId, true)
+        const completionId = isCustom && customScenarioRef.current?.categoryId
+          ? `cg-${customScenarioRef.current.categoryId}`
+          : scenarioId
+        await setScenarioCompletion(user.uid, completionId, true)
       } catch {
-        // Non-fatal — still navigate home
+        // Non-fatal
       }
     }
+
+    if (user?.uid && messages.length > 1) {
+      try {
+        let characterName = ''
+        if (isCustom && customScenarioRef.current) {
+          characterName = customScenarioRef.current.name || ''
+        } else {
+          const variantKey = variantRef.current
+          const names = SCENARIO_CHARACTER_NAMES[scenarioId] || {}
+          characterName = (variantKey && names[variantKey]) ? names[variantKey] : (names.default || '')
+        }
+        await saveTranscript({
+          userId: user.uid,
+          userEmail: user.email || '',
+          userName: user.displayName || user.email?.split('@')[0] || '',
+          scenarioId,
+          scenarioName: isCustom ? (scenario?.categoryName || scenario?.name || scenarioId) : (scenario?.name || scenarioId),
+          characterName,
+          isCustom: !!isCustom,
+          messages: messages.filter((m) => m.content),
+        })
+      } catch {
+        // Non-fatal — transcript save failure should not block navigation
+      }
+    }
+
     navigateHome()
   }
 
@@ -228,7 +296,7 @@ function Practice({ scenarioId }) {
     }
   }
 
-  if (authLoading) {
+  if (authLoading || customLoading) {
     return (
       <div className="practice-loading">
         <p>Loading...</p>
@@ -262,9 +330,11 @@ function Practice({ scenarioId }) {
           <h1 className="practice-title">{scenario.name}</h1>
         </div>
         <div className="practice-header-right">
-          <span className={isImplemented ? 'scenario-status-implemented' : 'scenario-status-not-implemented'}>
-            {isImplemented ? 'Implemented' : 'Not implemented'}
-          </span>
+          {!isCustom && (
+            <span className={isImplemented ? 'scenario-status-implemented' : 'scenario-status-not-implemented'}>
+              {isImplemented ? 'Implemented' : 'Not implemented'}
+            </span>
+          )}
           <button
             className="secondary-action button-reset"
             onClick={handleEndSession}

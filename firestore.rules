@@ -49,6 +49,38 @@ service cloud.firestore {
       }
     }
 
+    // Scenario overrides (name/summary/intensity edits) are publicly readable
+    match /scenarioOverrides/{scenarioId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Admin codes are server-only — no client reads or writes ever
+    match /adminCodes/{codeId} {
+      allow read, write: if false;
+    }
+
+    // Storylines are publicly readable; writes only via Cloud Functions
+    match /storylines/{storylineId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Custom categories are publicly readable; writes only via Cloud Functions
+    match /customCategories/{categoryId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Transcripts: users can create and read their own; writes via client only
+    match /transcripts/{transcriptId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.userId == request.auth.uid;
+      allow read: if isSignedIn() &&
+        resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

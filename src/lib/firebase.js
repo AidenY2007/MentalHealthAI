@@ -18,11 +18,15 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getFirestore,
   onSnapshot,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore'
 
 const firebaseConfig = {
@@ -301,4 +305,58 @@ export async function deleteNote(userId, noteId) {
   }
 
   await deleteDoc(doc(db, 'users', userId, 'notes', noteId))
+}
+
+export async function saveTranscript({
+  userId,
+  userEmail,
+  userName,
+  scenarioId,
+  scenarioName,
+  characterName,
+  isCustom,
+  messages,
+}) {
+  if (!db || !userId) throw new Error('Firebase not configured.')
+  return addDoc(collection(db, 'transcripts'), {
+    userId,
+    userEmail: userEmail || '',
+    userName: userName || '',
+    scenarioId,
+    scenarioName,
+    characterName,
+    isCustom: !!isCustom,
+    messages,
+    completedAt: serverTimestamp(),
+  })
+}
+
+export function subscribeToUserTranscripts(userId, onValue, onError) {
+  if (!db || !userId) return () => {}
+  return onSnapshot(
+    query(collection(db, 'transcripts'), where('userId', '==', userId)),
+    onValue,
+    onError,
+  )
+}
+
+export function subscribeToScenarioOverrides(onValue, onError) {
+  if (!db) return () => {}
+  return onSnapshot(collection(db, 'scenarioOverrides'), onValue, onError)
+}
+
+export function subscribeToStorylines(onValue, onError) {
+  if (!db) return () => {}
+  return onSnapshot(
+    query(collection(db, 'storylines'), orderBy('createdAt', 'desc')),
+    onValue,
+    onError,
+  )
+}
+
+export async function getStorylineById(id) {
+  if (!db || !id) throw new Error('Firebase not configured.')
+  const snapshot = await getDoc(doc(db, 'storylines', id))
+  if (!snapshot.exists()) return null
+  return { id: snapshot.id, ...snapshot.data() }
 }

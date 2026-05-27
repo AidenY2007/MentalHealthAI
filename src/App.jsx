@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Home from './pages/Home'
 import Practice from './pages/Practice'
+import Admin from './pages/Admin'
 import './App.css'
 import { siteConfig } from './config/site'
 
@@ -42,6 +43,10 @@ function App() {
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
+
+  if (currentPath === '/admin') {
+    return <Admin />
+  }
 
   if (currentPath.startsWith('/practice/')) {
     const scenarioId = currentPath.split('/')[2]

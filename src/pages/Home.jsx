@@ -16,9 +16,12 @@ import {
   signInWithEmail,
   signInWithGoogle,
   signOutUser,
+  subscribeToScenarioOverrides,
+  subscribeToStorylines,
   subscribeToUserNotes,
   subscribeToUserReflections,
   subscribeToUserProfile,
+  subscribeToUserTranscripts,
   updateNote,
   updateReflection,
 } from '../lib/firebase'
@@ -154,6 +157,33 @@ function Home() {
   const [editingNoteId, setEditingNoteId] = useState('')
   const [deletingNoteId, setDeletingNoteId] = useState('')
   const [pendingDeleteNoteId, setPendingDeleteNoteId] = useState('')
+  const [customStorylines, setCustomStorylines] = useState([])
+  const [scenarioOverrides, setScenarioOverrides] = useState({})
+  const [scenarioTab, setScenarioTab] = useState('training')
+  const [userTranscripts, setUserTranscripts] = useState([])
+  const [selectedTranscript, setSelectedTranscript] = useState(null)
+
+  useEffect(() => {
+    return subscribeToStorylines(
+      (snapshot) => {
+        setCustomStorylines(
+          snapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+        )
+      },
+      () => {},
+    )
+  }, [])
+
+  useEffect(() => {
+    return subscribeToScenarioOverrides(
+      (snapshot) => {
+        const map = {}
+        snapshot.docs.forEach((d) => { map[d.id] = d.data() })
+        setScenarioOverrides(map)
+      },
+      () => {},
+    )
+  }, [])
 
   useEffect(() => {
     function handlePopState() {
@@ -175,6 +205,27 @@ function Home() {
 
     return unsubscribe
   }, [])
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setUserTranscripts([])
+      return undefined
+    }
+    return subscribeToUserTranscripts(
+      user.uid,
+      (snapshot) => {
+        const sorted = snapshot.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => {
+            const aMs = a.completedAt?.toMillis?.() ?? 0
+            const bMs = b.completedAt?.toMillis?.() ?? 0
+            return bMs - aMs
+          })
+        setUserTranscripts(sorted)
+      },
+      () => {},
+    )
+  }, [user?.uid])
 
   useEffect(() => {
     if (!user?.uid) {
@@ -712,18 +763,52 @@ function Home() {
     user?.email?.split('@')[0] ||
     'there'
   const heroGreeting = `${getGreeting()}, ${greetingName}!`
-  const uncompletedScenarios = scenarioCategories
-    .filter((scenario) => !completedScenarioIds.includes(scenario.id))
-    .sort((left, right) => left.name.localeCompare(right.name))
-  const completedScenarios = scenarioCategories
-    .filter((scenario) => completedScenarioIds.includes(scenario.id))
-    .sort((left, right) => left.name.localeCompare(right.name))
-  const completedCount = completedScenarioIds.filter((scenarioId) =>
-    scenarioCategories.some((scenario) => scenario.id === scenarioId),
-  ).length
-  const progressPercent = Math.round(
-    (completedCount / scenarioCategories.length) * 100,
+  const displayScenarios = scenarioCategories.map((s) => ({
+    ...s,
+    ...(scenarioOverrides[s.id] || {}),
+  }))
+  const builtinScenarioIds = new Set(scenarioCategories.map((s) => s.id))
+  // custom storylines under built-in categories get merged into the built-in card
+  const customStorylinesForBuiltin = customStorylines
+    .filter((s) => builtinScenarioIds.has(s.categoryId))
+    .reduce((acc, s) => {
+      if (!acc[s.categoryId]) acc[s.categoryId] = []
+      acc[s.categoryId].push(s)
+      return acc
+    }, {})
+  const customCategoryGroups = Object.values(
+    customStorylines
+      .filter((s) => !builtinScenarioIds.has(s.categoryId))
+      .reduce((acc, s) => {
+        const catId = s.categoryId || s.id
+        if (!acc[catId]) {
+          acc[catId] = { id: `cg-${catId}`, _type: 'custom-group', name: s.categoryName, storylines: [] }
+        }
+        acc[catId].storylines.push(s)
+        return acc
+      }, {})
   )
+  const uncompletedScenarios = [
+    ...displayScenarios.filter((scenario) => !completedScenarioIds.includes(scenario.id)),
+    ...customCategoryGroups.filter((g) => !completedScenarioIds.includes(g.id)),
+  ].sort((a, b) => {
+    const aImpl = (a._type === 'custom-group' || IMPLEMENTED_SCENARIOS.has(a.id)) ? 0 : 1
+    const bImpl = (b._type === 'custom-group' || IMPLEMENTED_SCENARIOS.has(b.id)) ? 0 : 1
+    if (aImpl !== bImpl) return aImpl - bImpl
+    return a.name.localeCompare(b.name)
+  })
+  const completedScenarios = [
+    ...displayScenarios.filter((scenario) => completedScenarioIds.includes(scenario.id)),
+    ...customCategoryGroups.filter((g) => completedScenarioIds.includes(g.id)),
+  ].sort((left, right) => left.name.localeCompare(right.name))
+  const totalCategoryCount = scenarioCategories.length + customCategoryGroups.length
+  const completedCount = completedScenarioIds.filter((id) =>
+    scenarioCategories.some((s) => s.id === id) ||
+    customCategoryGroups.some((g) => g.id === id),
+  ).length
+  const progressPercent = totalCategoryCount > 0
+    ? Math.round((completedCount / totalCategoryCount) * 100)
+    : 0
   const selectedReflection =
     reflections.find((reflection) => reflection.id === selectedReflectionId) || null
   const selectedNote =
@@ -739,6 +824,16 @@ function Home() {
             type="button"
           >
             Support
+          </button>
+          <button
+            className="secondary-action button-reset"
+            onClick={() => {
+              window.history.pushState({}, '', '/admin')
+              window.dispatchEvent(new Event('popstate'))
+            }}
+            type="button"
+          >
+            Admin
           </button>
         </div>
 
@@ -1431,7 +1526,7 @@ function Home() {
                   <div>
                     <p className="progress-label">Category progress</p>
                     <p className="progress-copy">
-                      {completedCount} of {scenarioCategories.length} completed
+                      {completedCount} of {totalCategoryCount} completed
                     </p>
                   </div>
                   <span className="progress-percent">{progressPercent}%</span>
@@ -1485,54 +1580,177 @@ function Home() {
 
         <section className="scenario-section">
           <article className="workspace-card">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Scenario library</p>
-                <h2>Begin Training</h2>
-              </div>
+            <div className="scenario-tabs">
+              <button
+                className={`scenario-tab button-reset${scenarioTab === 'training' ? ' scenario-tab-active' : ''}`}
+                onClick={() => { setScenarioTab('training'); setSelectedTranscript(null) }}
+                type="button"
+              >
+                Begin Training
+              </button>
+              <button
+                className={`scenario-tab button-reset${scenarioTab === 'transcripts' ? ' scenario-tab-active' : ''}`}
+                onClick={() => { setScenarioTab('transcripts'); setSelectedTranscript(null) }}
+                type="button"
+              >
+                Conversation Transcripts
+              </button>
             </div>
+
+            {scenarioTab === 'transcripts' ? (
+              <div className="transcript-panel">
+                {selectedTranscript ? (
+                  <div className="transcript-detail">
+                    <div className="transcript-detail-header">
+                      <button
+                        className="transcript-back button-reset"
+                        onClick={() => setSelectedTranscript(null)}
+                        type="button"
+                      >
+                        Back
+                      </button>
+                      <div className="transcript-detail-meta">
+                        <p className="transcript-detail-title">{selectedTranscript.scenarioName}</p>
+                        <p className="transcript-detail-sub">
+                          {selectedTranscript.characterName}
+                          {selectedTranscript.completedAt ? ` · ${new Date(selectedTranscript.completedAt.toMillis ? selectedTranscript.completedAt.toMillis() : selectedTranscript.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="transcript-messages">
+                      {(selectedTranscript.messages || []).map((msg, i) => (
+                        <div key={i} className={`transcript-message transcript-message-${msg.role}`}>
+                          <span className="transcript-role">{msg.role === 'user' ? 'You' : selectedTranscript.characterName || 'Caller'}</span>
+                          <p className="transcript-bubble">{msg.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {userTranscripts.length === 0 ? (
+                      <p className="transcript-empty">No conversations yet. Complete a practice session to see your transcripts here.</p>
+                    ) : (
+                      <div className="transcript-list">
+                        {userTranscripts.map((t) => (
+                          <button
+                            className="transcript-item button-reset"
+                            key={t.id}
+                            onClick={() => setSelectedTranscript(t)}
+                            type="button"
+                          >
+                            <div className="transcript-item-main">
+                              <span className="transcript-item-character">{t.characterName || '—'}</span>
+                              <span className="transcript-item-category">{t.scenarioName}</span>
+                            </div>
+                            <span className="transcript-item-date">
+                              {t.completedAt ? new Date(t.completedAt.toMillis ? t.completedAt.toMillis() : t.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
 
             <p className="scenario-group-label">Incomplete</p>
             <div className="scenario-list">
-              {scenarioCategories
-                .filter((s) => !completedScenarioIds.includes(s.id))
-                .sort((a, b) => {
-                  const aImpl = IMPLEMENTED_SCENARIOS.has(a.id) ? 0 : 1
-                  const bImpl = IMPLEMENTED_SCENARIOS.has(b.id) ? 0 : 1
-                  if (aImpl !== bImpl) return aImpl - bImpl
-                  return a.name.localeCompare(b.name)
-                })
-                .map((scenario) => {
-                  const implemented = IMPLEMENTED_SCENARIOS.has(scenario.id)
+              {uncompletedScenarios.map((scenario) => {
+                if (scenario._type === 'custom-group') {
+                  const characterNames = scenario.storylines.map((s) => s.name).join(', ')
                   return (
                     <article key={scenario.id} className="scenario-item">
                       <div className="scenario-topline">
                         <h3>{scenario.name}</h3>
-                        <span className={implemented ? 'scenario-status-implemented' : 'scenario-status-not-implemented'}>
-                          {implemented ? 'Implemented' : 'Not implemented'}
-                        </span>
+                        <span className="scenario-status-implemented">Implemented</span>
                       </div>
-                      <p>{scenario.summary}</p>
+                      <p>{characterNames}</p>
                       <button
                         className="scenario-action button-reset"
-                        onClick={() => openPractice(scenario.id)}
+                        onClick={() => {
+                          const pick = scenario.storylines[Math.floor(Math.random() * scenario.storylines.length)]
+                          openPractice(`custom-${pick.id}`)
+                        }}
                         type="button"
                       >
                         Start
                       </button>
                     </article>
                   )
-                })}
+                }
+                const implemented = IMPLEMENTED_SCENARIOS.has(scenario.id)
+                const extraCustom = customStorylinesForBuiltin[scenario.id] || []
+                return (
+                  <article key={scenario.id} className="scenario-item">
+                    <div className="scenario-topline">
+                      <h3>{scenario.name}</h3>
+                      <span className={implemented ? 'scenario-status-implemented' : 'scenario-status-not-implemented'}>
+                        {implemented ? 'Implemented' : 'Not implemented'}
+                      </span>
+                    </div>
+                    <p>{scenario.summary}</p>
+                    <button
+                      className="scenario-action button-reset"
+                      onClick={() => {
+                        if (extraCustom.length > 0) {
+                          const pool = [null, ...extraCustom]
+                          const pick = pool[Math.floor(Math.random() * pool.length)]
+                          openPractice(pick ? `custom-${pick.id}` : scenario.id)
+                        } else {
+                          openPractice(scenario.id)
+                        }
+                      }}
+                      type="button"
+                    >
+                      Start
+                    </button>
+                  </article>
+                )
+              })}
             </div>
 
             {completedScenarios.length > 0 ? (
               <>
                 <p className="scenario-group-label scenario-group-label-completed">Completed</p>
                 <div className="scenario-list">
-                  {completedScenarios
-                    .slice()
-                    .sort((a, b) => a.name.localeCompare(b.name))
-                    .map((scenario) => (
+                  {completedScenarios.map((scenario) => {
+                    if (scenario._type === 'custom-group') {
+                      const characterNames = scenario.storylines.map((s) => s.name).join(', ')
+                      return (
+                        <article key={scenario.id} className="scenario-item scenario-item-completed">
+                          <div className="scenario-topline">
+                            <h3>{scenario.name}</h3>
+                            <span className="scenario-status-completed">Completed</span>
+                          </div>
+                          <p>{characterNames}</p>
+                          <div className="scenario-action-row">
+                            <button
+                              className="scenario-action button-reset"
+                              onClick={() => {
+                                const pick = scenario.storylines[Math.floor(Math.random() * scenario.storylines.length)]
+                                openPractice(`custom-${pick.id}`)
+                              }}
+                              type="button"
+                            >
+                              Practice again
+                            </button>
+                            <button
+                              className="scenario-action scenario-action-secondary button-reset"
+                              disabled={updatingScenarioId === scenario.id}
+                              onClick={() => handleScenarioToggle(scenario.id, false)}
+                              type="button"
+                            >
+                              {updatingScenarioId === scenario.id ? 'Saving...' : 'Mark incomplete'}
+                            </button>
+                          </div>
+                        </article>
+                      )
+                    }
+                    const extraCustomCompleted = customStorylinesForBuiltin[scenario.id] || []
+                    return (
                       <article key={scenario.id} className="scenario-item scenario-item-completed">
                         <div className="scenario-topline">
                           <h3>{scenario.name}</h3>
@@ -1542,7 +1760,15 @@ function Home() {
                         <div className="scenario-action-row">
                           <button
                             className="scenario-action button-reset"
-                            onClick={() => openPractice(scenario.id)}
+                            onClick={() => {
+                              if (extraCustomCompleted.length > 0) {
+                                const pool = [null, ...extraCustomCompleted]
+                                const pick = pool[Math.floor(Math.random() * pool.length)]
+                                openPractice(pick ? `custom-${pick.id}` : scenario.id)
+                              } else {
+                                openPractice(scenario.id)
+                              }
+                            }}
                             type="button"
                           >
                             Practice again
@@ -1559,10 +1785,14 @@ function Home() {
                           </button>
                         </div>
                       </article>
-                    ))}
+                    )
+                  })}
                 </div>
               </>
             ) : null}
+
+              </>
+            )}
           </article>
         </section>
 
